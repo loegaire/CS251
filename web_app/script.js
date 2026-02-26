@@ -9,12 +9,12 @@ var GENESIS = '0x000000000000000000000000000000000000000000000000000000000000000
 
 // This is the ABI for your contract (get it from Remix, in the 'Compile' tab)
 // ============================================================
-var abi = []; // FIXME: fill this in with your contract's ABI //Be sure to only have one array, not two
+var abi = [{"type":"function","name":"add_IOU","inputs":[{"name":"creditor","type":"address","internalType":"address"},{"name":"amount","type":"uint32","internalType":"uint32"},{"name":"path","type":"address[]","internalType":"address[]"}],"outputs":[],"stateMutability":"nonpayable"},{"type":"function","name":"debts","inputs":[{"name":"","type":"address","internalType":"address"},{"name":"","type":"address","internalType":"address"}],"outputs":[{"name":"","type":"uint32","internalType":"uint32"}],"stateMutability":"view"},{"type":"function","name":"lookup","inputs":[{"name":"debtor","type":"address","internalType":"address"},{"name":"creditor","type":"address","internalType":"address"}],"outputs":[{"name":"ret","type":"uint32","internalType":"uint32"}],"stateMutability":"view"},{"type":"function","name":"neighbors","inputs":[{"name":"","type":"address","internalType":"address"},{"name":"","type":"uint256","internalType":"uint256"}],"outputs":[{"name":"","type":"address","internalType":"address"}],"stateMutability":"view"}];
 // ============================================================
 abiDecoder.addABI(abi);
 // call abiDecoder.decodeMethod to use this - see 'getAllFunctionCalls' for more
 
-var contractAddress = ""; // FIXME: fill this in with your contract's address/hash
+var contractAddress = "0x5FbDB2315678afecb367f032d93F642f64180aa3"; // FIXME: fill this in with your contract's address/hash
 
 var BlockchainSplitwise = new ethers.Contract(contractAddress, abi, provider.getSigner());
 
@@ -27,26 +27,131 @@ var BlockchainSplitwise = new ethers.Contract(contractAddress, abi, provider.get
 // TODO: Return a list of all users (creditors or debtors) in the system
 // All users in the system are everyone who has ever sent or received an IOU
 async function getUsers() {
+    let users = new Set();
+    
+    // Lấy số thứ tự của block mới nhất
+    let latestBlock = await provider.getBlockNumber();
 
+    // Quét toàn bộ lịch sử từ block 0 đến block hiện tại
+    for (let i = 0; i <= latestBlock; i++) {
+        let block = await provider.getBlockWithTransactions(i);
+        
+        for (let tx of block.transactions) {
+            // Kiểm tra xem giao dịch có gửi đến Hợp đồng của chúng ta không
+            if (tx.to && tx.to.toLowerCase() === contractAddress.toLowerCase()) {
+                
+                // Thêm người gửi giao dịch (con nợ)
+                users.add(tx.from.toLowerCase());
+
+                try {
+                    // Giải mã giao dịch để xem người nhận (chủ nợ) là ai
+                    let decodedTx = BlockchainSplitwise.interface.parseTransaction(tx);
+                    if (decodedTx.name === "add_IOU") {
+                        let creditorAddress = decodedTx.args[0];
+                        users.add(creditorAddress.toLowerCase());
+                    }
+                } catch (error) {
+                    // Bỏ qua nếu giao dịch không thuộc về hàm add_IOU
+                }
+            }
+        }
+    }
+    // Trả về danh sách dưới dạng mảng
+    return Array.from(users);
 }
 
 // TODO: Get the total amount owed by the user specified by 'user'
-async function getTotalOwed(user) {
+async function getTotalowed(user) {
+    let total = 0;
+    user = user.toLowerCase();
+    
+    let allUsers = await getUsers();
 
+    for (let creditor of allUsers) {
+        if (user !== creditor) {
+            // Gọi hàm lookup từ Solidity (không tốn gas vì là hàm view)
+            let amountOwed = await BlockchainSplitwise.lookup(user, creditor);
+            total += parseInt(amountOwed);
+        }
+    }
+
+    return total;
 }
 
 // TODO: Get the last time this user has sent or received an IOU, in seconds since Jan. 1, 1970
 // Return null if you can't find any activity for the user.
 // HINT: Try looking at the way 'getAllFunctionCalls' is written. You can modify it if you'd like.
 async function getLastActive(user) {
-	
+    user = user.toLowerCase();
+    let latestBlock = await provider.getBlockNumber();
+
+    // Quét NGƯỢC từ block mới nhất về block 0 để tìm giao dịch gần nhất cho nhanh
+    for (let i = latestBlock; i >= 0; i--) {
+        let block = await provider.getBlockWithTransactions(i);
+        
+        for (let tx of block.transactions) {
+            if (tx.to && tx.to.toLowerCase() === contractAddress.toLowerCase()) {
+                
+                let isSender = (tx.from.toLowerCase() === user);
+                let isCreditor = false;
+
+                try {
+                    let decodedTx = BlockchainSplitwise.interface.parseTransaction(tx);
+                    // Kiểm tra xem user có phải là creditor (tham số đầu tiên) không
+                    if (decodedTx.name === "add_IOU" && decodedTx.args[0].toLowerCase() === user) {
+                        isCreditor = true;
+                    }
+                } catch (error) {}
+
+                // Nếu user có liên quan đến giao dịch này, trả về ngay timestamp của block đó
+                if (isSender || isCreditor) {
+                    return block.timestamp;
+                }
+            }
+        }
+    }
+    
+    // Nếu quét hết mà không thấy
+    return null;
 }
 
 // TODO: add an IOU ('I owe you') to the system
 // The person you owe money is passed as 'creditor'
 // The amount you owe them is passed as 'amount'
 async function add_IOU(creditor, amount) {
-	
+    let formattedCreditor = creditor.toLowerCase();
+    let formattedAmount = parseInt(amount);
+
+    // 1. Lấy địa chỉ ví của chính bạn (Con nợ)
+    let debtor = defaultAccount.toLowerCase();
+
+    // 2. Định nghĩa hàm getNeighbors (Tìm những người mà 'node' đang nợ)
+    // Hàm này rất cần thiết cho thuật toán BFS chạy
+    async function getNeighbors(node) {
+        let neighbors = [];
+        let allUsers = await getUsers();
+        for (let user of allUsers) {
+            if (user !== node) {
+                let owed = await BlockchainSplitwise.lookup(node, user);
+                if (parseInt(owed) > 0) {
+                    neighbors.push(user);
+                }
+            }
+        }
+        return neighbors;
+    }
+
+    // 3. Chạy hàm doBFS để tìm đường đi từ Chủ nợ (creditor) về Con nợ (debtor)
+    let path = await doBFS(formattedCreditor, debtor, getNeighbors);
+
+    // Nếu không tìm thấy vòng lặp, path sẽ là null. Ta chuyển nó thành mảng rỗng.
+    if (path === null) {
+        path = [];
+    }
+
+    // 4. Gửi lệnh add_IOU xuống Blockchain, kèm theo số tiền và CẢ ĐƯỜNG ĐI (path)
+    let tx = await BlockchainSplitwise.add_IOU(formattedCreditor, formattedAmount, path);
+    await tx.wait();
 }
 
 // =============================================================================
