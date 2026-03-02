@@ -1,8 +1,0 @@
-(undo-tree-save-format-version . 1)
-"35d8a99010fb7c2e2be42dc836c352f50d540641"
-[nil nil nil nil (27038 42146 408829 11000) 0 nil]
-([nil nil (("// DO NOT MODIFY BELOW THIS
-" . 41) (undo-tree-id0 . -27) (t 26861 27138 0 0)) nil (27038 42146 408827 361000) 0 nil])
-([nil nil ((41 . 69)) nil (27038 42146 408810 151000) 0 nil])
-([nil current ((210 . 213) (t 26861 27138 0 0)) nil (27038 42146 408805 810000) 0 nil])
-nil

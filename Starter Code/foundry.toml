@@ -1,5 +1,0 @@
-[profile.default]
-src = "contracts"
-out = "build"
-libs = ["lib"]
-solc_version = "0.8.17"
